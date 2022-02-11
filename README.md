@@ -8,7 +8,7 @@
     - `in.txt` - input test text
     - `out.txt` - expected output text
 - run `go run submissions.go`
-- reports put in `<projfolder>/reports`. Be sure to check for compile errors / etc as this program cannot fix all misaligned class / filenames
+- reports put in `<projfolder>/reports`. Be sure to check for compile errors / etc as this program cannot fix all misaligned class / filenames. you can cat the reports in a terminal to get diff highlighting.
 
 ## Notes
 
