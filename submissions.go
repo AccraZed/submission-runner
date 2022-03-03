@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,29 +35,31 @@ func (s Status) String() string {
 	return "UNKNOWN STATUS"
 }
 
+type Submission struct {
+	Name          string
+	CompileResult *Result
+	RunResults    []*Result
+}
+
 type Result struct {
 	Status Status
 	out    string
 	err    string
 }
 
-type Submission struct {
-	Name          string
-	CompileResult *Result
-	RunResult     *Result
-}
-
 func main() {
 	// Target folder contains Submissions folder (with raw submissions)
-	// and in.txt / out.txt
-	targetDir := "project2"
+	// and testcases folder (with <whatever>.in / .out (MUST BE ORDERED BY NUMBER))
+	targetDir := "p3"
 	subDir := filepath.Join(targetDir, "submissions")
-	in := filepath.Join(targetDir, "in.txt")
-	out := filepath.Join(targetDir, "out.txt")
+	testsDir := filepath.Join(targetDir, "testcases")
+	timeoutSecs := 5
+
+	in, out := getTestNames(testsDir)
 
 	// Run Submissions
-	subChan := make(chan *Submission)
-	go filepath.Walk(subDir, func(path string, info os.FileInfo, err error) error {
+	submissions := make([]*Submission, 0)
+	filepath.Walk(subDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -66,9 +69,12 @@ func main() {
 		}
 
 		fmt.Printf("Running %s...\n", path)
-		// Could in theory spawn goroutine for each submission but that would
-		// mean potential cpu max + incorrect runtimes
-		runSubmission(path, in, subChan)
+		sub, err := runSubmission(path, in, timeoutSecs)
+		if err != nil {
+			return err
+		}
+
+		submissions = append(submissions, sub)
 		return nil
 	})
 
@@ -77,58 +83,79 @@ func main() {
 	os.RemoveAll(repDir)
 	os.Mkdir(repDir, 0777)
 
-	ff, err := os.ReadDir(subDir)
-	if err != nil {
-		panic(err)
+	finishedChan := make(chan bool)
+	for _, sub := range submissions {
+		fmt.Printf("Writing report for %s...\n", sub.Name)
+		go writeReport(repDir, out, sub, finishedChan)
 	}
 
-	outFile, err := os.ReadFile(out)
-	if err != nil {
-		panic(err)
-	}
-	expectedOut := string(outFile)
-
-	repChan := make(chan bool)
-	for i := 0; i < len(ff); i++ {
-		s := <-subChan
-		fmt.Printf("Writing report for %s...\n", s.Name)
-		go writeReport(repDir, &expectedOut, s, repChan)
-	}
-
-	for i := 0; i < len(ff); i++ {
-		_ = <-repChan
+	for i := 0; i < len(submissions); i++ {
+		<-finishedChan
 	}
 
 	fmt.Println("All Reports Completed. Exiting...")
 	fmt.Println("Please make sure to check error logs as students may have incongruent filenames to class names!!")
 }
 
-func runSubmission(path string, in string, subChan chan *Submission) error {
+func getTestNames(testsDir string) (in []string, out []string) {
+	// Sort in/out files
+	in = make([]string, 0)
+	out = make([]string, 0)
+	filepath.Walk(testsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		testType := strings.Split(path, ".")[1]
+		if testType == "in" {
+			in = append(in, path)
+
+		} else {
+			out = append(out, path)
+		}
+		return nil
+	})
+	sort.Strings(in)
+	sort.Strings(out)
+
+	return
+}
+
+func runSubmission(path string, inFiles []string, timeout int) (*Submission, error) {
 	dir, className := makeTestDir(path)
 
 	sub := &Submission{
-		Name: dir,
+		Name:       dir,
+		RunResults: make([]*Result, 0),
 	}
 
+	// Compile
 	sub.CompileResult = runCompile(dir, className)
 	if sub.CompileResult.Status == STATUS_ERR {
-		subChan <- sub
 		os.RemoveAll(dir)
-		return nil
+		return sub, nil
 	}
 
-	var err error
-	sub.RunResult, err = runExec(dir, className, in, 5)
+	// Run test cases
+	for _, inFile := range inFiles {
+		fmt.Printf("case %s...\n", inFile)
+		res, err := runExec(dir, className, inFile, timeout)
+		if err != nil {
+			return nil, err
+		}
 
-	os.RemoveAll(dir)
-
+		sub.RunResults = append(sub.RunResults, res)
+	}
+	err := os.RemoveAll(dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	subChan <- sub
-
-	return nil
+	return sub, nil
 }
 
 func runCompile(dir, className string) *Result {
@@ -205,13 +232,93 @@ func runExec(dir, className, in string, timeoutSec int) (*Result, error) {
 	return runRes, nil
 }
 
-func makeTestDir(path string) (string, string) {
+func writeReport(repDir string, outs []string, sub *Submission, finishedChan chan bool) error {
+	numErr := 0
+	numTimeout := 0
+	numOk := 0
+
+	for _, res := range sub.RunResults {
+		switch res.Status {
+		case STATUS_ERR:
+			numErr++
+		case STATUS_TIMEOUT:
+			numTimeout++
+		case STATUS_OK:
+			numOk++
+		}
+	}
+
+	f, err := os.Create(filepath.Join(repDir, sub.Name+".txt"))
+	if err != nil {
+		finishedChan <- false
+		return err
+	}
+	defer f.Close()
+
+	// Print Compile Result
+	f.WriteString(fmt.Sprintf("Report For %s\n\n", strings.Split(sub.Name, "_")[0]))
+	f.WriteString(fmt.Sprintf("------------------Compile Result: %s------------------\n", sub.CompileResult.Status))
+	if sub.CompileResult.Status == STATUS_ERR {
+		f.WriteString("Error Log:\n")
+		f.WriteString(sub.CompileResult.err + "\n\n")
+	}
+	if len(sub.CompileResult.out) != 0 {
+		f.WriteString("Out Log:\n")
+		f.WriteString(sub.CompileResult.out + "\n\n")
+	}
+	if sub.CompileResult.Status == STATUS_ERR {
+		finishedChan <- true
+		return nil
+	}
+
+	// Print Run Results
+	f.WriteString(fmt.Sprintf("------------------Run Results------------------\nTimeout: %d\nError: %d\nNo Timeout/Error: %d\n\n",
+		numTimeout, numErr, numOk))
+
+	f.WriteString("Test Cases:\n")
+	diffCnt := 0
+	for i, res := range sub.RunResults {
+		outFile, err := os.ReadFile(outs[i])
+		if err != nil {
+			finishedChan <- false
+			return err
+		}
+		outText := strings.ReplaceAll(string(outFile), "\r", "")
+		f.WriteString(fmt.Sprintf("Case %s: %s\n", outs[i], res.Status))
+		if res.Status == STATUS_ERR {
+			f.WriteString("Error Log:\n")
+			f.WriteString(res.err + "\n\n")
+			continue
+		}
+
+		dmp := diffmatchpatch.New()
+		diffs := dmp.DiffMain(outText, res.out, false)
+		diff := dmp.DiffPrettyText(diffs)
+		if diff != outText {
+			diffCnt++
+			f.WriteString("Diff Log:\n\n")
+			f.WriteString(diff)
+		} else {
+			f.WriteString("Diff Log: No Diff!\n\n")
+			continue
+		}
+		f.WriteString("Out Log:\n\n")
+		f.WriteString(res.out)
+	}
+
+	f.WriteString(fmt.Sprintf("\n\n---------------Number of mismatch test outputs: %d---------------\n\n", diffCnt))
+
+	finishedChan <- false
+	return nil
+}
+
+func makeTestDir(path string) (dir string, class string) {
 	// Get class name
 	raw := strings.Split(strings.TrimSuffix(filepath.Base(path), ".java"), "_")
-	class := strings.Split(strings.Join(raw[3:], ""), "-")[0]
+	class = strings.Split(strings.Join(raw[3:], ""), "-")[0]
 
 	// Setup test folder
-	dir := strings.TrimSuffix(filepath.Base(path), ".java")
+	dir = strings.TrimSuffix(filepath.Base(path), ".java")
 	os.Mkdir(dir, 0777)
 	copy(path, filepath.Join(dir, class+".java"))
 
@@ -241,43 +348,4 @@ func copy(src, dst string) (int64, error) {
 	defer destination.Close()
 	nBytes, err := io.Copy(destination, source)
 	return nBytes, err
-}
-
-func writeReport(repDir string, expectedOut *string, sub *Submission, repChan chan bool) {
-	f, err := os.Create(filepath.Join(repDir, sub.Name+".txt"))
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer f.Close()
-
-	f.WriteString(fmt.Sprintf("REPORT FOR %s\n\n", strings.Split(sub.Name, "_")[0]))
-
-	// Print Compile Results
-	f.WriteString(fmt.Sprintf("COMPILE RESULT: %s\n", sub.CompileResult.Status))
-	if sub.CompileResult.Status == STATUS_ERR {
-		f.WriteString("ERROR LOG:\n\n")
-		f.WriteString(sub.CompileResult.err)
-	}
-	f.WriteString("OUT LOG:\n\n")
-	f.WriteString(sub.CompileResult.out)
-
-	if sub.CompileResult.Status == STATUS_ERR {
-		repChan <- true
-		return
-	}
-	// Print Run Results
-	f.WriteString(fmt.Sprintf("\n\nRUN RESULT: %s\n", sub.RunResult.Status))
-	if sub.RunResult.Status == STATUS_ERR {
-		f.WriteString("ERROR LOG:\n\n")
-		f.WriteString(sub.RunResult.err)
-	}
-	f.WriteString("DIFF LOG:\n\n")
-	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(*expectedOut, sub.RunResult.out, true)
-	f.WriteString(dmp.DiffPrettyText(diffs))
-	f.WriteString("OUT LOG:\n\n")
-	f.WriteString(sub.RunResult.out)
-
-	repChan <- true
 }

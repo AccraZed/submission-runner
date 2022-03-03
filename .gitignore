@@ -1,4 +1,7 @@
 */reports/*
+*/ignore/*
+*/testcases/*
 */submissions/*
+.vscode
 */in.txt
 */out.txt
