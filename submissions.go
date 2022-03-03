@@ -90,6 +90,7 @@ func run(targetDir, timeout string) error {
 
 	fmt.Println("All Reports Completed. Exiting...")
 	fmt.Println("Please make sure to check error logs as students may have incongruent filenames to class names!!")
+	return nil
 }
 
 func getTestNames(testsDir string) (in []string, out []string) {
