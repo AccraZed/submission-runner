@@ -5,61 +5,53 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
+	"github.com/urfave/cli/v2"
 )
-
-type Status int64
-
-const (
-	STATUS_OK Status = iota
-	STATUS_ERR
-	STATUS_TIMEOUT
-)
-
-func (s Status) String() string {
-	switch s {
-	case STATUS_OK:
-		return "OK"
-	case STATUS_ERR:
-		return "ERROR"
-	case STATUS_TIMEOUT:
-		return "TIMEOUT"
-	}
-	return "UNKNOWN STATUS"
-}
-
-type Submission struct {
-	Name          string
-	CompileResult *Result
-	RunResults    []*Result
-}
-
-type Result struct {
-	Status Status
-	out    string
-	err    string
-}
 
 func main() {
+	app := &cli.App{
+		Name: "SubmissionChecker",
+		Usage: "./submissioncheck <target directory> <timeout in seconds>\n\n" +
+			"Your target directory MUST contain the following folders:\n\n" +
+			"submissions - all student submissions, unaltered from the canvas download form.\n\n" +
+			"testcases - all testcase files, organized so that all inputs are in alphabetic order and all outputs are in alphabetic order.\nAll inputs MUST end in <.in> and all outputs MUST end in <.out>.\n\n(for context, this program filters into two groups by the <.xxx> extension, and then sorts each group alphabetically and assumes each ith <.in> file correlates with the ith <.out> file)",
+		Action: func(c *cli.Context) error {
+			run(c.Args().Get(0), c.Args().Get(1))
+			return nil
+		},
+	}
+
+	err := app.Run(os.Args)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run(targetDir, timeout string) error {
 	// Target folder contains Submissions folder (with raw submissions)
 	// and testcases folder (with <whatever>.in / .out (MUST BE ORDERED BY NUMBER))
-	targetDir := "p3"
 	subDir := filepath.Join(targetDir, "submissions")
 	testsDir := filepath.Join(targetDir, "testcases")
-	timeoutSecs := 5
+	timeoutSecs, err := strconv.Atoi(timeout)
+	if err != nil {
+		return err
+	}
 
 	in, out := getTestNames(testsDir)
 
 	// Run Submissions
 	submissions := make([]*Submission, 0)
-	filepath.Walk(subDir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(subDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -77,6 +69,9 @@ func main() {
 		submissions = append(submissions, sub)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
 
 	// Read Submissions / write reports
 	repDir := filepath.Join(targetDir, "reports")
@@ -348,4 +343,36 @@ func copy(src, dst string) (int64, error) {
 	defer destination.Close()
 	nBytes, err := io.Copy(destination, source)
 	return nBytes, err
+}
+
+type Status int64
+
+const (
+	STATUS_OK Status = iota
+	STATUS_ERR
+	STATUS_TIMEOUT
+)
+
+func (s Status) String() string {
+	switch s {
+	case STATUS_OK:
+		return "OK"
+	case STATUS_ERR:
+		return "ERROR"
+	case STATUS_TIMEOUT:
+		return "TIMEOUT"
+	}
+	return "UNKNOWN STATUS"
+}
+
+type Submission struct {
+	Name          string
+	CompileResult *Result
+	RunResults    []*Result
+}
+
+type Result struct {
+	Status Status
+	out    string
+	err    string
 }
