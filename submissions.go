@@ -78,14 +78,9 @@ func run(targetDir, timeout string) error {
 	os.RemoveAll(repDir)
 	os.Mkdir(repDir, 0777)
 
-	finishedChan := make(chan bool)
 	for _, sub := range submissions {
 		fmt.Printf("Writing report for %s...\n", sub.Name)
-		go writeReport(repDir, out, sub, finishedChan)
-	}
-
-	for i := 0; i < len(submissions); i++ {
-		<-finishedChan
+		writeReport(repDir, out, sub)
 	}
 
 	fmt.Println("All Reports Completed. Exiting...")
@@ -228,7 +223,7 @@ func runExec(dir, className, in string, timeoutSec int) (*Result, error) {
 	return runRes, nil
 }
 
-func writeReport(repDir string, outs []string, sub *Submission, finishedChan chan bool) error {
+func writeReport(repDir string, outs []string, sub *Submission) error {
 	numErr := 0
 	numTimeout := 0
 	numOk := 0
@@ -246,7 +241,6 @@ func writeReport(repDir string, outs []string, sub *Submission, finishedChan cha
 
 	f, err := os.Create(filepath.Join(repDir, sub.Name+".txt"))
 	if err != nil {
-		finishedChan <- false
 		return err
 	}
 	defer f.Close()
@@ -263,7 +257,6 @@ func writeReport(repDir string, outs []string, sub *Submission, finishedChan cha
 		f.WriteString(sub.CompileResult.out + "\n\n")
 	}
 	if sub.CompileResult.Status == STATUS_ERR {
-		finishedChan <- true
 		return nil
 	}
 
@@ -276,7 +269,6 @@ func writeReport(repDir string, outs []string, sub *Submission, finishedChan cha
 	for i, res := range sub.RunResults {
 		outFile, err := os.ReadFile(outs[i])
 		if err != nil {
-			finishedChan <- false
 			return err
 		}
 		outText := strings.ReplaceAll(string(outFile), "\r", "")
@@ -304,7 +296,6 @@ func writeReport(repDir string, outs []string, sub *Submission, finishedChan cha
 
 	f.WriteString(fmt.Sprintf("\n\n---------------Number of mismatch test outputs: %d---------------\n\n", diffCnt))
 
-	finishedChan <- false
 	return nil
 }
 
