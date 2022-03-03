@@ -2,15 +2,13 @@
 
 ## How To Use
 
-- Make sure you have golang installed
-- Add a folder in this root directory for a project. This folder will include:
-    - `submissions`: folder with all RAW js files from canvas submissions (don't need to rename)
-    - `in.txt` - input test text
-    - `out.txt` - expected output text
-- edit `submissions.go` and rename file directories to whatever is appropriate (top of main func) (will probably be changing this to be commandline)
-- run `go run submissions.go`
+- Add a folder for the project. This folder will include:
+    - `submissions`: folder with all RAW java files from canvas submissions (don't need to rename)
+    - `testcases`: folder with all testcases. Make sure every test case ends with `.in` or `.out`, and that each `.in` file is alphabetically matched with its `.out` file.
+- run `./submissioncheck <target directory> <timeout in seconds>`
 - reports put in `<projfolder>/reports`. Be sure to check for compile errors / etc as this program cannot fix all misaligned class / filenames. you can cat the reports in a terminal to get diff highlighting.
 
-## Notes
+## YOU CAN RUN `./submissioncheck help` FOR MORE HELPFUL INFO
 
+## Notes
 - This will ignore '-' marks at the end of a program name (usually whenever someone submits multiple times on canvas)
