@@ -2,6 +2,8 @@
 */ignore/*
 */testcases/*
 */submissions/*
+*/complete/*
 .vscode
 */in.txt
 */out.txt
+
