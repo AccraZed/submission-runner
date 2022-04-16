@@ -49,7 +49,6 @@ func main() {
 			},
 		},
 		Action: func(c *cli.Context) error {
-			fmt.Println(c.Bool("verbose"))
 			run(c.String("path"), c.String("timeout"), c.Bool("verbose"))
 			return nil
 		},
@@ -305,7 +304,11 @@ func writeReport(repDir string, outs []string, sub *Submission, verbose bool) er
 		f.WriteString(fmt.Sprintf("\nCase %s: %s\n", outs[i], res.Status))
 		if res.Status == STATUS_ERR {
 			f.WriteString("Error Log:\n")
-			f.WriteString(res.err + "\n\n")
+			if !verbose {
+				f.WriteString(truncLines(res.err, VerboseNumLines) + "\n\n")
+			} else {
+				f.WriteString(res.err + "\n\n")
+			}
 			continue
 		}
 
