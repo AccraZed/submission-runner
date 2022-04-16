@@ -18,15 +18,39 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+const VerboseNumLines = 50
+
 func main() {
 	app := &cli.App{
 		Name: "SubmissionChecker",
-		Usage: "./submissioncheck <target directory> <timeout in seconds>\n\n" +
+		Usage: "./submissioncheck -p <target directory> -t <timeout in seconds>\n\n" +
 			"Your target directory MUST contain the following folders:\n\n" +
 			"submissions - all student submissions, unaltered from the canvas download form.\n\n" +
 			"testcases - all testcase files, organized so that all inputs are in alphabetic order and all outputs are in alphabetic order.\nAll inputs MUST end in <.in> and all outputs MUST end in <.out>.\n\n(for context, this program filters into two groups by the <.xxx> extension, and then sorts each group alphabetically and assumes each ith <.in> file correlates with the ith <.out> file)",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "path",
+				Aliases:  []string{"p"},
+				Usage:    "path to project folder that contains submissions / testcases",
+				Required: true,
+			},
+			&cli.StringFlag{
+				Name:     "timeout",
+				Aliases:  []string{"t"},
+				Usage:    "timeout threshold when running tests, in seconds",
+				Required: true,
+			},
+			&cli.BoolFlag{
+				Name:     "verbose",
+				Aliases:  []string{"v"},
+				Usage:    "print full out/diff logs, even if the output is very large",
+				Required: false,
+				Value:    false,
+			},
+		},
 		Action: func(c *cli.Context) error {
-			run(c.Args().Get(0), c.Args().Get(1))
+			fmt.Println(c.Bool("verbose"))
+			run(c.String("path"), c.String("timeout"), c.Bool("verbose"))
 			return nil
 		},
 	}
@@ -37,7 +61,7 @@ func main() {
 	}
 }
 
-func run(targetDir, timeout string) error {
+func run(targetDir, timeout string, verbose bool) error {
 	// Target folder contains Submissions folder (with raw submissions)
 	// and testcases folder (with <whatever>.in / .out (MUST BE ORDERED BY NUMBER))
 	subDir := filepath.Join(targetDir, "submissions")
@@ -80,7 +104,7 @@ func run(targetDir, timeout string) error {
 
 	for _, sub := range submissions {
 		fmt.Printf("Writing report for %s...\n", sub.Name)
-		writeReport(repDir, out, sub)
+		writeReport(repDir, out, sub, verbose)
 	}
 
 	fmt.Println("All Reports Completed. Exiting...")
@@ -223,7 +247,7 @@ func runExec(dir, className, in string, timeoutSec int) (*Result, error) {
 	return runRes, nil
 }
 
-func writeReport(repDir string, outs []string, sub *Submission) error {
+func writeReport(repDir string, outs []string, sub *Submission, verbose bool) error {
 	numErr := 0
 	numTimeout := 0
 	numOk := 0
@@ -254,7 +278,11 @@ func writeReport(repDir string, outs []string, sub *Submission) error {
 	}
 	if len(sub.CompileResult.out) != 0 {
 		f.WriteString("Out Log:\n")
-		f.WriteString(sub.CompileResult.out + "\n\n")
+		if !verbose {
+			f.WriteString(truncLines(sub.CompileResult.out, VerboseNumLines) + "\n\n")
+		} else {
+			f.WriteString(sub.CompileResult.out + "\n\n")
+		}
 	}
 	if sub.CompileResult.Status == STATUS_ERR {
 		return nil
@@ -272,26 +300,39 @@ func writeReport(repDir string, outs []string, sub *Submission) error {
 			return err
 		}
 		outText := strings.ReplaceAll(string(outFile), "\r", "")
-		f.WriteString(fmt.Sprintf("Case %s: %s\n", outs[i], res.Status))
+
+		// Error log
+		f.WriteString(fmt.Sprintf("\nCase %s: %s\n", outs[i], res.Status))
 		if res.Status == STATUS_ERR {
 			f.WriteString("Error Log:\n")
 			f.WriteString(res.err + "\n\n")
 			continue
 		}
 
+		// Diff log
 		dmp := diffmatchpatch.New()
 		diffs := dmp.DiffMain(outText, res.out, false)
 		diff := dmp.DiffPrettyText(diffs)
 		if diff != outText {
 			diffCnt++
 			f.WriteString("Diff Log:\n\n")
-			f.WriteString(diff)
+			if !verbose {
+				f.WriteString(truncLines(diff, VerboseNumLines))
+			} else {
+				f.WriteString(diff)
+			}
 		} else {
 			f.WriteString("Diff Log: No Diff!\n\n")
 			continue
 		}
+
+		// Out log
 		f.WriteString("Out Log:\n\n")
-		f.WriteString(res.out)
+		if !verbose {
+			f.WriteString(truncLines(res.out, VerboseNumLines))
+		} else {
+			f.WriteString(res.out)
+		}
 	}
 
 	f.WriteString(fmt.Sprintf("\n\n---------------Number of mismatch test outputs: %d---------------\n\n", diffCnt))
@@ -335,6 +376,16 @@ func copy(src, dst string) (int64, error) {
 	defer destination.Close()
 	nBytes, err := io.Copy(destination, source)
 	return nBytes, err
+}
+
+func truncLines(output string, numLines int) string {
+	ret := strings.SplitAfterN(output, "\n", numLines)
+
+	if len(ret) >= numLines {
+		ret = ret[:len(ret)-1]
+		ret = append(ret, "\n=========OUTPUT TRUNCATED. USE -v FOR FULL LOG PRINT=========\n")
+	}
+	return strings.Join(ret, "")
 }
 
 type Status int64

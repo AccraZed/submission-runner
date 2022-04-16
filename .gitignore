@@ -6,4 +6,5 @@
 .vscode
 */in.txt
 */out.txt
-
+*.java
+*.class
